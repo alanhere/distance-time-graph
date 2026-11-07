@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#1e1b4b">
+<title>Walk the Graph!</title>
+<style>
+  :root { --pos:#38bdf8; --vel:#fb923c; --ink:#f1f5f9; --mute:#94a3b8; --card:#1e293b; --card2:#0f172a; --line:#334155; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 16px/1.35 ui-rounded, "SF Pro Rounded", "Nunito", "Trebuchet MS", "Segoe UI", system-ui, sans-serif; color: var(--ink);
+         background: linear-gradient(160deg, #312e81 0%, #1e1b4b 35%, #0f172a 100%) fixed;
+         display: flex; flex-direction: column; height: 100dvh; gap: 8px; padding: calc(8px + env(safe-area-inset-top)) calc(8px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left)); }
+  .title { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px; }
+  .title h1 { margin: 0; font-size: 19px; letter-spacing: .2px; white-space: nowrap; }
+  .title h1 span { background: linear-gradient(90deg, var(--pos), #a78bfa, var(--vel)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #status { display: inline-block; padding: 3px 12px; border-radius: 99px; font-weight: 700; font-size: 13px; white-space: nowrap; }
+  #status.ok { background: #14532d; color: #86efac; box-shadow: 0 0 0 2px #22c55e55; }
+  #status.warn { background: #422006; color: #fcd34d; } #status.bad { background: #450a0a; color: #fca5a5; }
+  header { display: flex; gap: 8px; align-items: stretch; }
+  .readouts { flex: 1; display: flex; gap: 8px; min-width: 0; }
+  .ro { flex: 1; border-radius: 18px; padding: 6px 12px 7px; background: var(--card); border: 2px solid var(--line); min-width: 0; }
+  .ro small { display: block; color: var(--mute); font-size: 13px; font-weight: 700; }
+  .ro b { font-size: 34px; font-variant-numeric: tabular-nums; line-height: 1.05; }
+  .ro span { font-size: 14px; color: var(--mute); margin-left: 3px; font-weight: 700; }
+  .ro em { display: block; font-style: normal; font-size: 12.5px; color: var(--mute); min-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ro.p { border-color: #0c4a6e; } .ro.p b { color: var(--pos); }
+  .ro.v { border-color: #7c2d12; } .ro.v b { color: var(--vel); }
+  #cam { position: relative; width: 112px; border-radius: 18px; overflow: hidden; background: #000; flex: none; display: none; border: 2px solid var(--line); }
+  body.running:not(.demo) #cam { display: block; }
+  #video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #calnote { font-size: 13.5px; font-weight: 700; color: #fcd34d; padding: 0 6px; }
+  #calnote:empty { display: none; }
+  .tabs { display: flex; gap: 8px; }
+  .tab { flex: 1; min-height: 46px; box-shadow: none !important; transform: none !important; background: var(--card); border: 2px solid var(--line); color: var(--mute); }
+  #tpos.on { background: #0c4a6e; border-color: var(--pos); color: #e0f2fe; }
+  #tvel.on { background: #7c2d12; border-color: var(--vel); color: #ffedd5; }
+  #gvel { display: none; }
+  #graphs { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+  canvas.g { flex: 1; min-height: 0; width: 100%; display: block; background: var(--card2); border: 2px solid var(--line); border-radius: 18px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button { font: inherit; font-weight: 800; min-height: 50px; padding: 0 18px; border-radius: 16px; border: 0; color: var(--ink); background: #334155; box-shadow: 0 4px 0 #1e293b; transition: transform .06s, box-shadow .06s; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #1e293b; }
+  button.primary { background: #22c55e; color: #052e16; box-shadow: 0 4px 0 #15803d; }
+  button.primary:active { box-shadow: 0 1px 0 #15803d; }
+  button.stop { background: #f43f5e; color: #fff; box-shadow: 0 4px 0 #be123c; }
+  button.stop:active { box-shadow: 0 1px 0 #be123c; }
+  button.fun { background: #8b5cf6; color: #fff; box-shadow: 0 4px 0 #6d28d9; }
+  button[hidden] { display: none; }
+  .when-running { display: none; } body.running .when-running { display: inline-block; } body.running .when-idle { display: none; }
+  details { width: 100%; background: var(--card); border: 2px solid var(--line); border-radius: 18px; padding: 4px 14px; }
+  summary { cursor: pointer; padding: 8px 0; color: var(--ink); font-weight: 800; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; padding: 6px 0 8px; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--mute); font-weight: 700; }
+  input, select { font: inherit; font-weight: 600; padding: 8px 10px; border: 2px solid var(--line); border-radius: 12px; color: var(--ink); background: var(--card2); min-height: 44px; }
+  label.chk { flex-direction: row; align-items: center; gap: 10px; color: var(--ink); }
+  label.chk input { min-height: 0; width: 22px; height: 22px; accent-color: #22c55e; }
+  .help { font-size: 14px; color: #cbd5e1; margin: 6px 0 10px; }
+  .help ol { margin: 6px 0 0; padding-left: 22px; } .help li { margin: 3px 0; }
+  #toast { position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%) scale(.95); background: #f8fafc; color: #0f172a; padding: 10px 16px; border-radius: 14px; font-weight: 700; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; max-width: 90vw; text-align: center; box-shadow: 0 6px 20px #0008; }
+  #toast.show { opacity: 1; transform: translateX(-50%) scale(1); }
+  @media (orientation: landscape) and (max-height: 520px) { .ro b { font-size: 24px; } .ro em { display: none; } #cam { width: 88px; } .title h1 { font-size: 16px; } button { min-height: 42px; } }
+</style>
+</head>
+<body>
+<div class="title"><h1>🚶 <span>Walk the Graph!</span></h1><div><span id="status" class="warn">Tap Start</span></div></div>
+<header>
+  <div class="readouts">
+    <div class="ro p"><small>📍 Position</small><b id="pos">–</b><span>m</span><em id="mp"></em></div>
+    <div class="ro v"><small>⚡ Velocity</small><b id="vel">–</b><span>m/s</span><em id="mv"></em></div>
+  </div>
+  <div id="cam"><video id="video" playsinline muted autoplay></video><canvas id="overlay"></canvas></div>
+</header>
+<div id="calnote"></div>
+<div class="tabs"><button id="tpos" class="tab on">📍 Position</button><button id="tvel" class="tab">⚡ Velocity</button></div>
+<div id="graphs"><canvas id="gpos" class="g"></canvas><canvas id="gvel" class="g"></canvas></div>
+<div class="bar">
+  <button id="start" class="primary when-idle">📷 Start camera</button>
+  <button id="demo" class="fun when-idle">🎮 Try the demo</button>
+  <button id="rec" class="primary when-running">⏺ Record</button>
+  <button id="clear" hidden>🗑 Clear</button>
+  <button id="csv" hidden>💾 Save data</button>
+  <button id="cal" class="when-running">📏 Calibrate</button>
+  <details>
+    <summary>⚙️ Settings and help</summary>
+    <div class="grid">
+      <label>Calibration distance: camera to marker (m)<input id="caldist" type="number" inputmode="decimal" step="0.1" min="0.5" value="2"></label>
+      <label>Black square size (cm), used until calibrated<input id="msize" type="number" inputmode="decimal" step="0.5" min="2" value="20"></label>
+      <label>Marker<select id="mid"></select></label>
+      <label class="chk"><input id="zero" type="checkbox"> Start recordings at position 0</label>
+    </div>
+    <div class="bar" style="padding:2px 0 8px">
+      <button id="flip">🔄 Front/back camera</button>
+      <button id="resetcal">Clear calibration</button>
+      <button id="stop" class="stop when-running">⏹ Stop camera</button>
+    </div>
+    <div class="help">
+      <b>How to play</b>
+      <ol>
+        <li>Stick the marker on a wall at about camera height.</li>
+        <li>Tap <b>Start camera</b> and point it at the marker. A green outline means it has been spotted.</li>
+        <li>Stand a measured distance away (2 m is good) and tap <b>Calibrate</b> once.</li>
+        <li>Tap <b>Record</b>, then walk! Away from the marker is <b>+</b>, towards it is <b>−</b>.</li>
+        <li>Try walking fast, slow, speeding up, slowing down, and standing still. Can you predict the graph first?</li>
+      </ol>
+      <p>Keep the marker in view and avoid very jerky movement. Velocity is the slope of the position graph over the last half second. Nothing leaves your phone: the camera picture is analysed right on it.</p>
+    </div>
+  </details>
+</div>
+<div id="toast"></div>
+<script>
+/* Minimal ArUco DICT_4X4_50 detector, no dependencies.
+ * Works in the browser (global ArucoLite) and in Node (module.exports). */
+(function (root) {
+  'use strict';
+
+  // 16-bit codes (row-major 4x4 inner bits, white = 1) for DICT_4X4_50, taken from OpenCV.
+  var CODES = [46386,3994,13101,39238,21662,31181,40494,50418,65242,53078,63889,4519,3767,10767,9393,9790,18021,26112,27742,30383,34443,45099,52437,56706,65095,38001,44260,42324,8483,13423,17429,22450,40655,61643,2222,2345,6261,1279,3574,7258,5912,10792,12940,14514,9448,12011,11583,19300,20526,20499];
+
+  function popcount16(x) { x = x - ((x >> 1) & 0x5555); x = (x & 0x3333) + ((x >> 2) & 0x3333); x = (x + (x >> 4)) & 0x0f0f; return (x + (x >> 8)) & 0x1f; }
+
+  // rotate a 4x4 bit code by 90 degrees clockwise
+  function rot90(code) {
+    var out = 0;
+    for (var r = 0; r < 4; r++) for (var c = 0; c < 4; c++) {
+      var bit = (code >> (15 - (r * 4 + c))) & 1;
+      var nr = c, nc = 3 - r;
+      out |= bit << (15 - (nr * 4 + nc));
+    }
+    return out;
+  }
+
+  // Lookup: every rotation of every marker -> {id, rot}
+  var ROTS = [];
+  for (var id = 0; id < CODES.length; id++) {
+    var c = CODES[id];
+    for (var k = 0; k < 4; k++) { ROTS.push({ code: c, id: id, rot: k }); c = rot90(c); }
+  }
+  function lookup(code) {
+    var best = null, bestD = 99;
+    for (var i = 0; i < ROTS.length; i++) {
+      var d = popcount16(code ^ ROTS[i].code);
+      if (d < bestD) { bestD = d; best = ROTS[i]; if (d === 0) break; }
+    }
+    return bestD <= 1 ? { id: best.id, rot: best.rot, dist: bestD } : null;
+  }
+
+  function Detector() {
+    this.w = 0; this.h = 0;
+  }
+
+  Detector.prototype._alloc = function (w, h) {
+    this.w = w; this.h = h;
+    this.integral = new Int32Array((w + 1) * (h + 1));
+    this.mask = new Uint8Array(w * h);
+    this.labels = new Int32Array(w * h);
+    this.stack = new Int32Array(w * h);
+  };
+
+  // gray: Uint8Array(w*h). radius: half-size of the adaptive-threshold window (px).
+  Detector.prototype._threshold = function (gray, radius, C) {
+    var w = this.w, h = this.h, I = this.integral, W1 = w + 1;
+    var x, y;
+    for (x = 0; x <= w; x++) I[x] = 0;
+    for (y = 0; y < h; y++) {
+      var rowSum = 0, base = (y + 1) * W1, prev = y * W1;
+      I[base] = 0;
+      for (x = 0; x < w; x++) { rowSum += gray[y * w + x]; I[base + x + 1] = I[prev + x + 1] + rowSum; }
+    }
+    var m = this.mask;
+    for (y = 0; y < h; y++) {
+      var y0 = Math.max(0, y - radius), y1 = Math.min(h, y + radius + 1);
+      for (x = 0; x < w; x++) {
+        var x0 = Math.max(0, x - radius), x1 = Math.min(w, x + radius + 1);
+        var sum = I[y1 * W1 + x1] - I[y0 * W1 + x1] - I[y1 * W1 + x0] + I[y0 * W1 + x0];
+        var area = (x1 - x0) * (y1 - y0);
+        m[y * w + x] = (gray[y * w + x] * area < sum - C * area) ? 1 : 0;
+      }
+    }
+  };
+
+  function cross(o, a, b) { return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]); }
+
+  function convexHull(pts) {
+    pts.sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; });
+    var lower = [], i;
+    for (i = 0; i < pts.length; i++) {
+      while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], pts[i]) <= 0) lower.pop();
+      lower.push(pts[i]);
+    }
+    var upper = [];
+    for (i = pts.length - 1; i >= 0; i--) {
+      while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], pts[i]) <= 0) upper.pop();
+      upper.push(pts[i]);
+    }
+    lower.pop(); upper.pop();
+    return lower.concat(upper);
+  }
+
+  function polyArea(p) {
+    var a = 0;
+    for (var i = 0; i < p.length; i++) { var j = (i + 1) % p.length; a += p[i][0] * p[j][1] - p[j][0] * p[i][1]; }
+    return Math.abs(a) / 2;
+  }
+  function polyPerim(p) {
+    var s = 0;
+    for (var i = 0; i < p.length; i++) { var j = (i + 1) % p.length; s += Math.hypot(p[i][0] - p[j][0], p[i][1] - p[j][1]); }
+    return s;
+  }
+
+  // Four corners of a roughly square convex hull: two far-apart points, then the farthest on each side.
+  function hullToQuad(hull) {
+    var cx = 0, cy = 0, i;
+    for (i = 0; i < hull.length; i++) { cx += hull[i][0]; cy += hull[i][1]; }
+    cx /= hull.length; cy /= hull.length;
+    var A = hull[0], best = -1;
+    for (i = 0; i < hull.length; i++) { var d = Math.hypot(hull[i][0] - cx, hull[i][1] - cy); if (d > best) { best = d; A = hull[i]; } }
+    var B = A; best = -1;
+    for (i = 0; i < hull.length; i++) { var d2 = Math.hypot(hull[i][0] - A[0], hull[i][1] - A[1]); if (d2 > best) { best = d2; B = hull[i]; } }
+    var C = null, D = null, bc = 0, bd = 0;
+    for (i = 0; i < hull.length; i++) {
+      var s = cross(A, B, hull[i]);
+      if (s > bc) { bc = s; C = hull[i]; }
+      if (-s > bd) { bd = -s; D = hull[i]; }
+    }
+    if (!C || !D) return null;
+    var q = [A, C, B, D]; // order around the polygon
+    // enforce one winding direction, otherwise the sampled grid can come out mirrored
+    var s2 = 0;
+    for (i = 0; i < 4; i++) { var j = (i + 1) % 4; s2 += q[i][0] * q[j][1] - q[j][0] * q[i][1]; }
+    if (s2 < 0) q = [A, D, B, C];
+    // hull points are pixel centres; push the corners out by half a pixel
+    var qx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4, qy = (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4;
+    return q.map(function (p) {
+      var dx = p[0] - qx, dy = p[1] - qy, len = Math.hypot(dx, dy) || 1;
+      return [p[0] + 0.5 * dx / len * 1.414, p[1] + 0.5 * dy / len * 1.414];
+    });
+  }
+
+  // Projective map from the unit square to a quad (Heckbert). Returns function(u,v)->[x,y].
+  function squareToQuad(q) {
+    var x0 = q[0][0], y0 = q[0][1], x1 = q[1][0], y1 = q[1][1], x2 = q[2][0], y2 = q[2][1], x3 = q[3][0], y3 = q[3][1];
+    var dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
+    var dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+    var g, hh;
+    var det = dx1 * dy2 - dx2 * dy1;
+    if (Math.abs(det) < 1e-9) { g = 0; hh = 0; }
+    else { g = (dx3 * dy2 - dx2 * dy3) / det; hh = (dx1 * dy3 - dx3 * dy1) / det; }
+    var a = x1 - x0 + g * x1, b = x3 - x0 + hh * x3, c = x0;
+    var d = y1 - y0 + g * y1, e = y3 - y0 + hh * y3, f = y0;
+    return function (u, v) {
+      var den = g * u + hh * v + 1;
+      return [(a * u + b * v + c) / den, (d * u + e * v + f) / den];
+    };
+  }
+
+  Detector.prototype._decode = function (gray, quad) {
+    var w = this.w, h = this.h;
+    var map = squareToQuad(quad);
+    var vals = new Array(36), r, c, k;
+    for (r = 0; r < 6; r++) for (c = 0; c < 6; c++) {
+      var sum = 0, n = 0;
+      for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
+        var p = map((c + 0.5 + dx * 0.2) / 6, (r + 0.5 + dy * 0.2) / 6);
+        var px = Math.round(p[0]), py = Math.round(p[1]);
+        if (px < 0 || py < 0 || px >= w || py >= h) return null;
+        sum += gray[py * w + px]; n++;
+      }
+      vals[r * 6 + c] = sum / n;
+    }
+    // two-cluster threshold on the 36 cell values
+    var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    if (hi - lo < 25) return null;
+    var t = (lo + hi) / 2;
+    for (k = 0; k < 6; k++) {
+      var s0 = 0, n0 = 0, s1 = 0, n1 = 0;
+      for (var i = 0; i < 36; i++) { if (vals[i] < t) { s0 += vals[i]; n0++; } else { s1 += vals[i]; n1++; } }
+      if (!n0 || !n1) return null;
+      t = (s0 / n0 + s1 / n1) / 2;
+    }
+    var bad = 0;
+    for (r = 0; r < 6; r++) for (c = 0; c < 6; c++) {
+      if (r === 0 || r === 5 || c === 0 || c === 5) { if (vals[r * 6 + c] >= t) bad++; }
+    }
+    if (bad > 1) return null;
+    var code = 0;
+    for (r = 1; r <= 4; r++) for (c = 1; c <= 4; c++) code = (code << 1) | (vals[r * 6 + c] >= t ? 1 : 0);
+    return lookup(code);
+  };
+
+  /* Detect markers. gray: Uint8Array(w*h). opts.radius: threshold window half-size (px).
+   * Returns array of {id, corners, side, area, cx, cy}, largest first. */
+  Detector.prototype.detect = function (gray, w, h, opts) {
+    opts = opts || {};
+    if (w !== this.w || h !== this.h) this._alloc(w, h);
+    var radius = Math.max(8, Math.round(opts.radius || w / 8));
+    var C = opts.C == null ? 9 : opts.C;
+    this._threshold(gray, radius, C);
+
+    var mask = this.mask, labels = this.labels, stack = this.stack;
+    labels.fill(0);
+    var out = [], nextLabel = 0, x, y;
+    var minSize = opts.minSize || 10;
+
+    for (y = 1; y < h - 1; y++) {
+      for (x = 1; x < w - 1; x++) {
+        var idx = y * w + x;
+        if (!mask[idx] || labels[idx]) continue;
+        nextLabel++;
+        var sp = 0, count = 0, minX = x, maxX = x, minY = y, maxY = y, touches = false;
+        stack[sp++] = idx; labels[idx] = nextLabel;
+        while (sp) {
+          var p = stack[--sp], px = p % w, py = (p - px) / w;
+          count++;
+          if (px < minX) minX = px; if (px > maxX) maxX = px;
+          if (py < minY) minY = py; if (py > maxY) maxY = py;
+          if (px === 0 || py === 0 || px === w - 1 || py === h - 1) { touches = true; continue; }
+          var n;
+          n = p - 1; if (mask[n] && !labels[n]) { labels[n] = nextLabel; stack[sp++] = n; }
+          n = p + 1; if (mask[n] && !labels[n]) { labels[n] = nextLabel; stack[sp++] = n; }
+          n = p - w; if (mask[n] && !labels[n]) { labels[n] = nextLabel; stack[sp++] = n; }
+          n = p + w; if (mask[n] && !labels[n]) { labels[n] = nextLabel; stack[sp++] = n; }
+        }
+        if (touches) continue;
+        var bw = maxX - minX + 1, bh = maxY - minY + 1;
+        if (bw < minSize || bh < minSize) continue;
+        if (bw > 3 * bh || bh > 3 * bw) continue;
+        var fill = count / (bw * bh);
+        if (fill < 0.2 || fill > 0.97) continue;
+
+        // row extremes -> convex hull
+        var pts = [];
+        for (var yy = minY; yy <= maxY; yy++) {
+          var l = -1, r = -1, base = yy * w;
+          for (var xx = minX; xx <= maxX; xx++) { if (labels[base + xx] === nextLabel) { l = xx; break; } }
+          if (l < 0) continue;
+          for (xx = maxX; xx >= l; xx--) { if (labels[base + xx] === nextLabel) { r = xx; break; } }
+          pts.push([l, yy]); if (r !== l) pts.push([r, yy]);
+        }
+        if (pts.length < 6) continue;
+        var hull = convexHull(pts);
+        if (hull.length < 4) continue;
+        var hullArea = polyArea(hull);
+        var quad = hullToQuad(hull);
+        if (!quad) continue;
+        var quadArea = polyArea(quad);
+        if (quadArea / hullArea < 0.9) continue;       // not square-ish
+        var sides = [];
+        for (var i = 0; i < 4; i++) sides.push(Math.hypot(quad[i][0] - quad[(i + 1) % 4][0], quad[i][1] - quad[(i + 1) % 4][1]));
+        var smin = Math.min.apply(null, sides), smax = Math.max.apply(null, sides);
+        if (smax / smin > 2.2) continue;
+        var found = this._decode(gray, quad);
+        if (!found) continue;
+        // area of the pixel-centre hull; side = sqrt(area). Unbiased enough once calibrated (see test/).
+        var area = hullArea;
+        out.push({
+          id: found.id, corners: quad, area: area, side: Math.sqrt(area),
+          cx: (quad[0][0] + quad[1][0] + quad[2][0] + quad[3][0]) / 4,
+          cy: (quad[0][1] + quad[1][1] + quad[2][1] + quad[3][1]) / 4
+        });
+      }
+    }
+    out.sort(function (a, b) { return b.area - a.area; });
+    return out;
+  };
+
+  var api = { Detector: Detector, CODES: CODES };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.ArucoLite = api;
+})(typeof window !== 'undefined' ? window : this);
+
+</script>
+<script>
+/* Distance and velocity helpers. Browser global Kin, or Node module. */
+(function (root) {
+  'use strict';
+
+  // Distance (m) from the marker's apparent side length (px).
+  // cal.k = side_px * distance_m, measured once at a known distance (best).
+  // Otherwise use the pinhole estimate f * S / side, with f from an assumed horizontal field of view.
+  function distance(sidePx, cal, imgWidthPx, markerSizeM, hfovDeg) {
+    if (cal && cal.k) return cal.k / sidePx;
+    var f = imgWidthPx / (2 * Math.tan((hfovDeg || 65) * Math.PI / 360));
+    return f * markerSizeM / sidePx;
+  }
+
+  // Least-squares slope of d against t over the last `win` seconds ending at index `end`.
+  // samples: array of {t, d} where d may be null. Returns null if too few points.
+  function slope(samples, end, win) {
+    var t1 = samples[end].t, pts = [];
+    for (var i = end; i >= 0 && samples[i].t >= t1 - win; i--) if (samples[i].d != null) pts.push(samples[i]);
+    if (pts.length < 4) return null;
+    var span = pts[0].t - pts[pts.length - 1].t;
+    if (span < win * 0.4) return null;
+    var mt = 0, md = 0, n = pts.length, j;
+    for (j = 0; j < n; j++) { mt += pts[j].t; md += pts[j].d; }
+    mt /= n; md /= n;
+    var num = 0, den = 0;
+    for (j = 0; j < n; j++) { num += (pts[j].t - mt) * (pts[j].d - md); den += (pts[j].t - mt) * (pts[j].t - mt); }
+    return den > 0 ? num / den : null;
+  }
+
+  // Median of three, to remove single-frame outliers. Operates on d values only (null-safe).
+  function median3(a, b, c) {
+    if (a == null || b == null || c == null) return b;
+    return a > b ? (b > c ? b : (a > c ? c : a)) : (a > c ? a : (b > c ? c : b));
+  }
+
+  var api = { distance: distance, slope: slope, median3: median3 };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.Kin = api;
+})(typeof window !== 'undefined' ? window : this);
+
+</script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+
+  var WORK_W = 800;          // analysis width in pixels
+  var VEL_WIN = 0.5;         // seconds used for each velocity estimate
+  var HFOV = 65;             // assumed horizontal field of view (degrees) before calibration
+  var LIVE_WIN = 10;         // seconds shown in live mode
+  var MAX_REC = 60;          // seconds
+  var SEARCH_R = [100, 30, 220];
+
+  var COL_POS = '#38bdf8', COL_VEL = '#fb923c';
+
+  var video = $('video'), overlay = $('overlay'), octx = overlay.getContext('2d');
+  var work = document.createElement('canvas'), wctx = work.getContext('2d', { willReadFrequently: true });
+  var gray = null, workH = 0;
+  var det = new ArucoLite.Detector();
+
+  var S = {
+    running: false, demo: false, stream: null, facing: 'environment',
+    mode: 'live',                 // live | recording | stopped
+    samples: [], t0: 0, tEnd: 0, origin: null,
+    lastSide: null, lostCount: 0, lastSeen: -99, recent: [],
+    cal: null, tab: 'pos', zero: false, now: 0, demoT0: 0, timer: null, vfc: false
+  };
+
+  // ---------- small helpers ----------
+  function toast(msg) {
+    var t = $('toast'); t.textContent = msg; t.className = 'show';
+    clearTimeout(toast._h); toast._h = setTimeout(function () { t.className = ''; }, 3500);
+  }
+  function lsGet(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } }
+  function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
+  function markerSizeM() { return clamp(parseFloat($('msize').value) || 20, 2, 200) / 100; }
+  function wantedId() { return parseInt($('mid').value, 10); }
+
+  // ---------- samples ----------
+  function addDistance(t, d) {
+    S.now = t;
+    var s = { t: t, d: d, v: null };
+    S.samples.push(s);
+    s.v = Kin.slope(S.samples, S.samples.length - 1, VEL_WIN);
+    if (S.mode === 'live') { while (S.samples.length && S.samples[0].t < t - 70) S.samples.shift(); }
+    if (S.mode === 'recording') {
+      if (S.origin == null && d != null) S.origin = d;
+      if (t - S.t0 >= MAX_REC) stopRecording();
+    }
+    updateReadouts(s);
+    draw();
+  }
+
+  function updateReadouts(s) {
+    var found = s.d != null;
+    var p = found ? (S.zero && S.origin != null && S.mode !== 'live' ? s.d - S.origin : s.d) : null;
+    $('pos').textContent = p == null ? '–' : p.toFixed(2);
+    $('vel').textContent = (s.v == null || !found) ? '–' : (Math.abs(s.v) < 0.005 ? 0 : s.v).toFixed(2);
+    var m = '';
+    if (found && s.v != null) m = Math.abs(s.v) < 0.08 ? 'still 🧍' : (s.v > 0 ? 'away ➡️' : 'towards ⬅️');
+    $('mv').textContent = m;
+    $('mp').textContent = found ? (S.zero && S.origin != null && S.mode !== 'live' ? 'from your start' : 'from the marker') : '';
+  }
+
+  // ---------- camera ----------
+  function startCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setStatus('bad', 'Camera not available. This page must be opened over https.');
+      return;
+    }
+    stopAll();
+    setStatus('warn', 'Starting camera…');
+    navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: S.facing }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 } }
+    }).then(function (stream) {
+      S.stream = stream; video.srcObject = stream;
+      return video.play();
+    }).then(function () {
+      var go = function () {
+        var vw = video.videoWidth, vh = video.videoHeight;
+        if (!vw) { setTimeout(go, 100); return; }
+        work.width = WORK_W; work.height = workH = Math.round(WORK_W * vh / vw);
+        gray = new Uint8Array(work.width * work.height);
+        var saved = lsGet('motion-cal-v1');
+        S.cal = (saved && saved.vw === vw && saved.vh === vh && saved.facing === S.facing) ? { k: saved.k } : null;
+        S.cal_dims = { vw: vw, vh: vh };
+        S.running = true; S.demo = false;
+        document.body.classList.add('running'); document.body.classList.remove('demo');
+        setStatus('warn', 'Looking for the marker 👀');
+        updateCalNote();
+        try { if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(function () {}); } catch (e) { /* ignore */ }
+        scheduleFrame();
+      };
+      go();
+    }).catch(function (err) {
+      var m = (err && err.name === 'NotAllowedError') ? 'Camera blocked. Allow camera access for this site in your browser settings, then reload.'
+        : (err && err.name === 'NotFoundError') ? 'No camera found on this device.'
+        : 'Could not start the camera (' + (err && err.name || 'error') + ').';
+      setStatus('bad', m);
+    });
+  }
+
+  function scheduleFrame() {
+    if (!S.running || S.demo) return;
+    if (video.requestVideoFrameCallback) {
+      video.requestVideoFrameCallback(function (now) { onFrame(now / 1000); });
+    } else {
+      requestAnimationFrame(function (now) { onFrame(now / 1000); });
+    }
+  }
+
+  function tryDetect(r) {
+    var res = det.detect(gray, work.width, work.height, { radius: r });
+    var id = wantedId();
+    return id >= 0 ? res.filter(function (m) { return m.id === id; }) : res;
+  }
+
+  function onFrame(t) {
+    if (!S.running || S.demo) return;
+    wctx.drawImage(video, 0, 0, work.width, work.height);
+    var px = wctx.getImageData(0, 0, work.width, work.height).data;
+    for (var i = 0, j = 0, n = gray.length; i < n; i++, j += 4) gray[i] = (px[j] * 77 + px[j + 1] * 150 + px[j + 2] * 29) >> 8;
+
+    var res;
+    if (S.lastSide) {
+      res = tryDetect(clamp(Math.round(S.lastSide * 1.2), 8, 300));
+      if (!res.length) res = tryDetect(100);
+    } else {
+      res = tryDetect(SEARCH_R[S.lostCount++ % SEARCH_R.length]);
+    }
+
+    drawOverlay(res.length ? res[0] : null);
+    if (res.length) {
+      var m = res[0];
+      S.lastSide = m.side; S.lostCount = 0; S.lastSeen = t;
+      S.recent.push({ t: t, side: m.side });
+      while (S.recent.length && S.recent[0].t < t - 0.7) S.recent.shift();
+      setStatus('ok', 'Got it! 🎯');
+      addDistance(t, Kin.distance(m.side, S.cal, work.width, markerSizeM(), HFOV));
+    } else {
+      S.lastSide = null;
+      if (t - S.lastSeen > 0.4) setStatus('warn', 'Looking for the marker 👀');
+      addDistance(t, null);
+    }
+    scheduleFrame();
+  }
+
+  function drawOverlay(m) {
+    var w = overlay.clientWidth, h = overlay.clientHeight;
+    if (overlay.width !== w) { overlay.width = w; overlay.height = h; }
+    octx.clearRect(0, 0, w, h);
+    if (!m) return;
+    // the preview box crops the video (object-fit: cover), so map corners the same way
+    var k = Math.max(w / work.width, h / work.height);
+    var ox = (w - work.width * k) / 2, oy = (h - work.height * k) / 2;
+    octx.lineWidth = 3; octx.strokeStyle = '#4ade80';
+    octx.beginPath();
+    for (var i = 0; i < 4; i++) { var p = m.corners[i], px = p[0] * k + ox, py = p[1] * k + oy; if (i) octx.lineTo(px, py); else octx.moveTo(px, py); }
+    octx.closePath(); octx.stroke();
+  }
+
+  function stopAll() {
+    S.running = false;
+    if (S.timer) { clearInterval(S.timer); S.timer = null; }
+    if (S.stream) { S.stream.getTracks().forEach(function (t) { t.stop(); }); S.stream = null; }
+    video.srcObject = null; S.lastSide = null; S.demo = false;
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    document.body.classList.remove('running', 'demo');
+  }
+
+  // ---------- demo (no camera) ----------
+  function demoPos(t) {
+    t = t % 12;
+    if (t < 2) return 2.0;
+    if (t < 6) return 2.0 + 2.0 * (t - 2) / 4;      // away, +0.5 m/s
+    if (t < 7.5) return 4.0;                          // still
+    if (t < 10) return 4.0 - 2.5 * (t - 7.5) / 2.5;  // towards, -1 m/s
+    return 1.5;
+  }
+  function gauss() { var u = 1 - Math.random(), v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+  function startDemo() {
+    stopAll();
+    S.running = true; S.demo = true; S.cal = { k: 1 };
+    document.body.classList.add('running', 'demo');
+    setStatus('ok', 'Demo 🎮');
+    $('calnote').textContent = '';
+    S.demoT0 = performance.now() / 1000;
+    S.timer = setInterval(function () {
+      var t = performance.now() / 1000;
+      addDistance(t, demoPos(t - S.demoT0) + gauss() * 0.015);
+    }, 33);
+  }
+
+  // ---------- recording ----------
+  function startRecording() {
+    S.mode = 'recording'; S.samples = []; S.origin = null; S.t0 = S.now || performance.now() / 1000;
+    $('rec').textContent = '⏹ Stop'; $('rec').classList.add('stop');
+    $('clear').hidden = true; $('csv').hidden = true;
+  }
+  function stopRecording() {
+    S.mode = 'stopped'; S.tEnd = S.now;
+    $('rec').textContent = '⏺ Record'; $('rec').classList.remove('stop');
+    $('clear').hidden = false; $('csv').hidden = false;
+    draw();
+  }
+  function clearRun() {
+    S.mode = 'live'; S.samples = []; S.origin = null;
+    $('clear').hidden = true; $('csv').hidden = true; draw();
+  }
+  function saveCsv() {
+    var rows = ['time_s,distance_m,velocity_m_s'];
+    S.samples.forEach(function (s) {
+      var d = s.d == null ? '' : (S.zero && S.origin != null ? s.d - S.origin : s.d).toFixed(4);
+      rows.push((s.t - S.t0).toFixed(3) + ',' + d + ',' + (s.v == null || s.d == null ? '' : s.v.toFixed(4)));
+    });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv' }));
+    a.download = 'motion-run.csv'; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
+  // ---------- calibration ----------
+  function calibrate() {
+    if (S.demo) { toast('Calibration is not needed in demo mode.'); return; }
+    var D = parseFloat($('caldist').value);
+    if (!(D > 0.3)) { toast('Enter the distance from the camera to the marker, in metres.'); return; }
+    if (S.recent.length < 5 || S.now - S.recent[S.recent.length - 1].t > 0.5) { toast('Point the camera at the marker first (green outline), then tap Calibrate.'); return; }
+    var sides = S.recent.map(function (r) { return r.side; }).sort(function (a, b) { return a - b; });
+    var med = sides[Math.floor(sides.length / 2)];
+    S.cal = { k: med * D };
+    lsSet('motion-cal-v1', { k: S.cal.k, vw: S.cal_dims.vw, vh: S.cal_dims.vh, facing: S.facing });
+    updateCalNote(); toast('📏 Calibrated at ' + D.toFixed(2) + ' m');
+  }
+  function updateCalNote() {
+    $('calnote').textContent = S.cal ? '' : '📏 Tap Calibrate at a known distance to get accurate numbers.';
+  }
+
+  function setStatus(kind, text) { var e = $('status'); e.className = kind; e.textContent = text; }
+
+  // ---------- graphs ----------
+  var cvs = { pos: $('gpos'), vel: $('gvel') };
+  var dpr = 1;
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    ['pos', 'vel'].forEach(function (k) {
+      var c = cvs[k], r = c.getBoundingClientRect();
+      c.width = Math.max(1, Math.round(r.width * dpr)); c.height = Math.max(1, Math.round(r.height * dpr));
+    });
+    draw();
+  }
+
+  function niceStep(range, n) {
+    var raw = range / n, p = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10)), f = raw / p;
+    return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p;
+  }
+
+  function viewWindow() {
+    if (S.mode === 'live') return { x0: -LIVE_WIN, x1: 0, ref: S.now };
+    if (S.mode === 'recording') return { x0: 0, x1: Math.max(10, S.now - S.t0), ref: S.t0 };
+    return { x0: 0, x1: Math.max(5, S.tEnd - S.t0), ref: S.t0 };
+  }
+
+  function drawGraph(canvas, o) {
+    var ctx = canvas.getContext('2d'), W = canvas.width / dpr, H = canvas.height / dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    var L = 46, R = 12, T = 20, B = 24, pw = W - L - R, ph = H - T - B;
+    if (pw < 20 || ph < 20) return;
+    var X = function (x) { return L + (x - o.x0) / (o.x1 - o.x0) * pw; };
+    var Y = function (y) { return T + (o.y1 - y) / (o.y1 - o.y0) * ph; };
+    ctx.font = '12px system-ui, sans-serif'; ctx.textBaseline = 'middle';
+    // grid + y ticks
+    ctx.lineWidth = 1; ctx.strokeStyle = '#243049'; ctx.fillStyle = '#94a3b8'; ctx.textAlign = 'right';
+    var v;
+    for (v = Math.ceil(o.y0 / o.ystep - 1e-9) * o.ystep; v <= o.y1 + 1e-9; v += o.ystep) {
+      var yy = Math.round(Y(v)) + 0.5;
+      ctx.strokeStyle = Math.abs(v) < 1e-9 && o.zeroLine ? '#94a3b8' : '#243049';
+      ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(L + pw, yy); ctx.stroke();
+      ctx.fillText((Math.abs(v) < 1e-9 ? 0 : v).toFixed(o.ystep < 1 ? (o.ystep < 0.1 ? 2 : 1) : 0), L - 6, yy);
+    }
+    // x ticks
+    var xs = niceStep(o.x1 - o.x0, 6);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (v = Math.ceil(o.x0 / xs - 1e-9) * xs; v <= o.x1 + 1e-9; v += xs) {
+      var xx = Math.round(X(v)) + 0.5;
+      ctx.strokeStyle = '#243049'; ctx.beginPath(); ctx.moveTo(xx, T); ctx.lineTo(xx, T + ph); ctx.stroke();
+      ctx.fillText((Math.abs(v) < 1e-9 ? 0 : v).toFixed(xs < 1 ? 1 : 0), xx, T + ph + 5);
+    }
+    ctx.strokeStyle = '#475569'; ctx.strokeRect(L + 0.5, T + 0.5, pw, ph);
+    // title
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = o.color; ctx.font = '600 13px system-ui, sans-serif';
+    ctx.fillText(o.title, L + 6, T - 8);
+    ctx.textAlign = 'right'; ctx.fillStyle = '#94a3b8'; ctx.font = '12px system-ui, sans-serif';
+    ctx.fillText(o.xlabel, L + pw, T - 8);
+    if (o.msg) {
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#cbd5e1'; ctx.font = '700 15px system-ui, sans-serif';
+      ctx.fillText(o.msg, L + pw / 2, T + ph / 2);
+    }
+    // line
+    ctx.save(); ctx.beginPath(); ctx.rect(L, T, pw, ph); ctx.clip();
+    ctx.strokeStyle = o.color; ctx.lineWidth = 3.5; ctx.shadowColor = o.color; ctx.shadowBlur = 8; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath();
+    var pen = false, lastP = null;
+    for (var i = 0; i < o.pts.length; i++) {
+      var p = o.pts[i];
+      if (!p) { pen = false; continue; }
+      if (pen) ctx.lineTo(X(p.x), Y(p.y)); else { ctx.moveTo(X(p.x), Y(p.y)); pen = true; }
+      lastP = p;
+    }
+    ctx.stroke();
+    if (lastP && S.mode !== 'stopped') { ctx.fillStyle = o.color; ctx.beginPath(); ctx.arc(X(lastP.x), Y(lastP.y), 5.5, 0, 6.2832); ctx.fill(); }
+    ctx.restore();
+  }
+
+  function draw() {
+    if (!gray && !S.demo && !S.samples.length && !S.running) { /* still draw empty axes */ }
+    var w = viewWindow(), pp = [], vp = [], i, prev = null, live = S.mode === 'live';
+    if (live) w = { x0: 0, x1: 10, ref: 0 };   // graphs stay empty until Record is pressed
+    var msg = live ? (S.running ? 'Press ⏺ Record, then start walking!' : 'Start the camera or try the demo') : '';
+    var off = (S.zero && S.origin != null && S.mode !== 'live') ? S.origin : 0;
+    var lo = Infinity, hi = -Infinity, vmax = 0;
+    for (i = 0; !live && i < S.samples.length; i++) {
+      var s = S.samples[i], x = s.t - w.ref;
+      if (x < w.x0 - 1 || x > w.x1 + 1) { prev = null; continue; }
+      if (s.d == null || (prev && s.t - prev.t > 0.25)) { pp.push(null); vp.push(null); }
+      if (s.d == null) { prev = null; continue; }
+      var y = s.d - off;
+      pp.push({ x: x, y: y }); if (y < lo) lo = y; if (y > hi) hi = y;
+      if (s.v != null) { vp.push({ x: x - VEL_WIN / 2, y: s.v }); if (Math.abs(s.v) > vmax) vmax = Math.abs(s.v); } else vp.push(null);
+      prev = s;
+    }
+    if (!isFinite(lo)) { lo = 0; hi = 4; }
+    var span = Math.max(hi - lo, 1), mid = (hi + lo) / 2;
+    var pl = mid - span * 0.6, ph = mid + span * 0.6, ps = niceStep(ph - pl, 5);
+    var xl = 'Time (s)';
+    if (S.tab === 'pos') drawGraph(cvs.pos, { pts: pp, x0: w.x0, x1: w.x1, y0: Math.floor(pl / ps) * ps, y1: Math.ceil(ph / ps) * ps, ystep: ps, color: COL_POS, title: 'Position (m)', xlabel: xl, msg: msg });
+    var vm = Math.max(1, vmax * 1.15), vs = niceStep(2 * vm, 5), vt = Math.ceil(vm / vs) * vs;
+    if (S.tab === 'vel') drawGraph(cvs.vel, { pts: vp, x0: w.x0, x1: w.x1, y0: -vt, y1: vt, ystep: vs, color: COL_VEL, title: 'Velocity (m/s)', xlabel: xl, zeroLine: true, msg: msg });
+  }
+
+  // ---------- wiring ----------
+  $('start').onclick = startCamera;
+  $('demo').onclick = startDemo;
+  $('stop').onclick = function () { stopAll(); setStatus('warn', 'Stopped ⏹'); $('pos').textContent = '–'; $('vel').textContent = '–'; };
+  $('rec').onclick = function () { if (S.mode === 'recording') stopRecording(); else startRecording(); };
+  $('clear').onclick = clearRun;
+  $('csv').onclick = saveCsv;
+  $('cal').onclick = calibrate;
+  $('resetcal').onclick = function () { S.cal = null; lsSet('motion-cal-v1', null); updateCalNote(); toast('Calibration cleared'); };
+  $('flip').onclick = function () { S.facing = S.facing === 'environment' ? 'user' : 'environment'; toast('Using the ' + (S.facing === 'user' ? 'front' : 'back') + ' camera'); if (S.running && !S.demo) startCamera(); };
+  $('zero').onchange = function () { S.zero = this.checked; draw(); };
+  function setTab(k) {
+    S.tab = k;
+    $('gpos').style.display = k === 'pos' ? 'block' : 'none';
+    $('gvel').style.display = k === 'vel' ? 'block' : 'none';
+    $('tpos').classList.toggle('on', k === 'pos');
+    $('tvel').classList.toggle('on', k === 'vel');
+    resize();
+  }
+  $('tpos').onclick = function () { setTab('pos'); };
+  $('tvel').onclick = function () { setTab('vel'); };
+  var midSel = $('mid');
+  var any = document.createElement('option'); any.value = '-1'; any.textContent = 'Any marker'; midSel.appendChild(any);
+  for (var q = 0; q < 50; q++) { var op = document.createElement('option'); op.value = q; op.textContent = 'ID ' + q; midSel.appendChild(op); }
+  window.addEventListener('resize', resize);
+  if (window.ResizeObserver) new ResizeObserver(resize).observe($('graphs'));
+  resize();
+  setStatus('warn', 'Tap Start');
+  window.__motion = { state: S, startDemo: startDemo };
+})();
+
+</script>
+</body>
+</html>
