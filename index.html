@@ -84,11 +84,14 @@
   <button id="clear" hidden>🗑 Clear</button>
   <button id="csv" hidden>💾 Save data</button>
   <button id="cal" class="when-running">📏 Calibrate</button>
+  <button id="beep" class="when-running">🔇 Beep off</button>
   <details>
     <summary>⚙️ Settings and help</summary>
     <div class="grid">
       <label>Calibration distance: camera to marker (m)<input id="caldist" type="number" inputmode="decimal" step="0.1" min="0.5" value="2"></label>
       <label>Black square size (cm), used until calibrated<input id="msize" type="number" inputmode="decimal" step="0.5" min="2" value="20"></label>
+      <label>Beeps become one steady tone closer than (m)<input id="near" type="number" inputmode="decimal" step="0.1" min="0.1" value="0.5"></label>
+      <label>Slowest beeps at this distance or further (m)<input id="far" type="number" inputmode="decimal" step="0.5" min="1" value="4"></label>
       <label>Marker<select id="mid"></select></label>
       <label class="chk"><input id="zero" type="checkbox"> Start recordings at position 0</label>
     </div>
@@ -104,6 +107,7 @@
         <li>Tap <b>Start camera</b> and point it at the marker. A green outline means it has been spotted.</li>
         <li>Stand a measured distance away (2 m is good) and tap <b>Calibrate</b> once.</li>
         <li>Tap <b>Record</b>, then walk! Away from the marker is <b>+</b>, towards it is <b>−</b>.</li>
+        <li>Switch on <b>Beep</b> to hear it like a car parking sensor: the closer you get to the marker, the faster it beeps. (Turn your phone's silent mode off.)</li>
         <li>Try walking fast, slow, speeding up, slowing down, and standing still. Can you predict the graph first?</li>
       </ol>
       <p>Keep the marker in view and avoid very jerky movement. Velocity is the slope of the position graph over the last half second. Nothing leaves your phone: the camera picture is analysed right on it.</p>
@@ -456,6 +460,7 @@
   // ---------- samples ----------
   function addDistance(t, d) {
     S.now = t;
+    if (d != null) { S.lastDist = d; S.lastDistAt = performance.now(); }
     var s = { t: t, d: d, v: null };
     S.samples.push(s);
     s.v = Kin.slope(S.samples, S.samples.length - 1, VEL_WIN);
@@ -481,6 +486,7 @@
 
   // ---------- camera ----------
   function startCamera() {
+    ensureAudio();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setStatus('bad', 'Camera not available. This page must be opened over https.');
       return;
@@ -581,7 +587,7 @@
     S.running = false;
     if (S.timer) { clearInterval(S.timer); S.timer = null; }
     if (S.stream) { S.stream.getTracks().forEach(function (t) { t.stop(); }); S.stream = null; }
-    video.srcObject = null; S.lastSide = null; S.demo = false;
+    video.srcObject = null; S.lastSide = null; S.demo = false; S.lastDist = null;
     octx.clearRect(0, 0, overlay.width, overlay.height);
     document.body.classList.remove('running', 'demo');
   }
@@ -597,6 +603,7 @@
   }
   function gauss() { var u = 1 - Math.random(), v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
   function startDemo() {
+    ensureAudio();
     stopAll();
     S.running = true; S.demo = true; S.cal = { k: 1 };
     document.body.classList.add('running', 'demo');
@@ -756,6 +763,46 @@
     if (S.tab === 'vel') drawGraph(cvs.vel, { pts: vp, x0: w.x0, x1: w.x1, y0: -vt, y1: vt, ystep: vs, color: COL_VEL, title: 'Velocity (m/s)', xlabel: xl, zeroLine: true, msg: msg });
   }
 
+  // ---------- parking-sensor beeps ----------
+  var A = { ctx: null, gain: null, on: false, next: 0, state: 'off', beeps: 0 };
+  function ensureAudio() {
+    if (A.ctx) { if (A.ctx.state === 'suspended') A.ctx.resume(); return; }
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    A.ctx = new AC(); A.gain = A.ctx.createGain(); A.gain.gain.value = 0;
+    var osc = A.ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = 880;
+    osc.connect(A.gain); A.gain.connect(A.ctx.destination); osc.start();
+    setInterval(beepTick, 15);
+  }
+  function beepTick() {
+    if (!A.ctx) return;
+    var t = A.ctx.currentTime, g = A.gain.gain;
+    var fresh = A.on && S.running && S.lastDist != null && performance.now() - S.lastDistAt < 400;
+    if (!fresh) {
+      if (A.state !== 'off') { g.cancelScheduledValues(t); g.setTargetAtTime(0, t, 0.01); A.state = 'off'; }
+      return;
+    }
+    var near = parseFloat($('near').value) || 0.5;
+    var far = Math.max(near + 0.5, parseFloat($('far').value) || 4);
+    var d = S.lastDist;
+    if (d <= near) {                                   // very close: steady tone
+      if (A.state !== 'cont') { g.cancelScheduledValues(t); g.setTargetAtTime(0.25, t, 0.01); A.state = 'cont'; }
+      return;
+    }
+    if (A.state === 'cont') { g.cancelScheduledValues(t); g.setTargetAtTime(0, t, 0.01); A.next = t + 0.05; }
+    A.state = 'beep';
+    if (t >= A.next) {
+      g.cancelScheduledValues(t); g.setValueAtTime(0.25, t); g.setValueAtTime(0.25, t + 0.06); g.linearRampToValueAtTime(0, t + 0.08);
+      A.beeps++;
+      A.next = t + 0.1 + 0.9 * clamp((d - near) / (far - near), 0, 1);   // 0.1 s apart when close, 1 s when far
+    }
+  }
+  $('beep').onclick = function () {
+    ensureAudio(); A.on = !A.on;
+    this.textContent = A.on ? '🔊 Beep on' : '🔇 Beep off';
+    this.classList.toggle('fun', A.on);
+  };
+
   // ---------- wiring ----------
   $('start').onclick = startCamera;
   $('demo').onclick = startDemo;
@@ -784,7 +831,7 @@
   if (window.ResizeObserver) new ResizeObserver(resize).observe($('graphs'));
   resize();
   setStatus('warn', 'Tap Start');
-  window.__motion = { state: S, startDemo: startDemo };
+  window.__motion = { state: S, startDemo: startDemo, audio: A };
 })();
 
 </script>
